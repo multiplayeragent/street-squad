@@ -1,0 +1,21 @@
+{
+  "name": "Street Squad",
+  "genre": "fighting",
+  "dim": "2D",
+  "mode": "Co-op",
+  "players": "1–4",
+  "hook": "Punch through the goons. Then take down the boss.",
+  "how": "Walk down the street and fight off each wave of goons together: punch three times for a combo, kick to knock them flat, jump-kick into a crowd. Clear all three areas and The Boss comes out.",
+  "controls": "Arrow keys or WASD, J punch, K kick, Space jump; on touch, drag to move and tap the buttons",
+  "uses": [
+    ["Host-run rules", "The host's browser runs the goons, the boss and the waves; if it leaves, the next player takes over."],
+    ["Bots", "AI buddies fight beside you until enough people join."],
+    ["Leaderboard", "Each player's best score."],
+    ["Live sync", "Every punch, knockdown and K.O. shows up for the whole squad at once."]
+  ],
+  "ideas": [
+    "Add a baseball bat you can pick up and swing",
+    "Add a special move that hits everyone around you",
+    "Make the street a pirate harbor with sailor goons"
+  ]
+}
