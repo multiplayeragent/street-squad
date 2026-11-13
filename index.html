@@ -33,6 +33,7 @@
   .card h2 { margin: 0 0 4px; font-size: 27px; color: #ffd23f; } .card h3 { margin: 14px 0 4px; font-size: 13px; color: #ff9fd1; text-align: left; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
   .card li span { float: right; font-variant-numeric: tabular-nums; } .card li.me { color: #ffd23f; font-weight: 700; }
+  .card li.note { list-style: none; margin-left: -24px; opacity: .8; } /* a message, not a ranked line */
   .card p { margin: 10px 0 0; font-size: 13px; opacity: .75; }
   button.go { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 12px; background: #ffd23f; color: #3a2400; font: 800 17px system-ui, sans-serif; cursor: pointer; }
   #acts { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 18px); width: 196px; height: 150px; touch-action: none; }
@@ -60,7 +61,7 @@
 <div id="over" hidden><div class="card">
   <h2 id="overTitle"></h2><div id="overSub"></div>
   <h3>The squad</h3><ol id="results"></ol>
-  <h3>Best scores</h3><ol id="board"><li>Loading…</li></ol>
+  <h3>Best scores</h3><ol id="board"><li class="note">Loading…</li></ol>
   <button class="go" id="again">Play again</button><p id="next"></p>
 </div></div>
 <script>
@@ -355,7 +356,7 @@ function mobTick(m, dt, heroes, g) {
 /** A goon hits someone: buddies and the host's own fighter right here, everyone else by event. */
 function hurtSomeone(h, d, kd, dir) {
   if (h.ref) { if (hurtHero(h.ref, d, kd, dir)) { hitFx(h.x, h.z, h.y + 70, "#ff4d6d"); if (h.ref === me) { shake = kd ? 14 : 7; sfx("ouch"); publish(true); } } }
-  else { net.send("hurt", { to: h.id, d, kd: kd ? 1 : 0, dir }); hitFx(h.x, h.z, h.y + 70, "#ff4d6d"); }
+  else net.send("hurt", { to: h.id, d, kd: kd ? 1 : 0, dir }); // its health drops in its state: every screen sparks then (see hurtFx)
 }
 /** A hit on goon m (from a player's "hit", a buddy, or the host's own fighter). The host checks and keeps score. */
 function applyHit(msg, from) {
@@ -363,8 +364,9 @@ function applyHit(msg, from) {
   if (!m || !a || !canBeHit(m) || Math.abs(a.x - m.x) > 160 || Math.abs(a.z - m.z) > 50) return;
   const d = clamp(Number(msg.d) || 0, 1, 20), dir = Math.sign(Number(msg.dir)) || 1;
   m.hp -= d;
+  if (from !== me.id && !host.bots.has(from)) hitFx(m.x, m.z, (m.y || 0) + 70 * E.size, msg.kd ? "#ffd23f" : "#ffffff", msg.kd ? "POW!" : ""); // another player's hit: my own and the buddies' already sparked
   let pts = d * 10;
-  if (m.hp <= 0) { m.st = "down"; m.stT = 0; m.vx = dir * 300; pts += E.points; koFx(m); if (Math.random() < (E.boss ? 1 : CONFIG.foodChance)) host.loot.push({ i: host.nextId++, x: Math.round(m.x), z: Math.round(m.z) }); }
+  if (m.hp <= 0) { m.st = "down"; m.stT = 0; m.vx = dir * 300; pts += E.points; koFx(m); if (Math.random() < (E.boss ? 1 : CONFIG.foodChance)) { const g = game(); host.loot.push({ i: host.nextId++, x: Math.round(clamp(m.x, g.min + 50, g.lock - 50)), z: Math.round(clamp(m.z, 0, DEPTH)) }); } } // on the walkable street, never past the area's end
   else if (msg.kd && !(E.boss && m.st === "charge")) { m.st = "down"; m.stT = 0; m.vx = dir * 240; }
   else if (!E.boss || m.st !== "charge") { m.st = "hurt"; m.stT = 0; m.vx = dir * 110; m.cd = Math.max(m.cd, 0.4); }
   m.f = -dir;
@@ -384,12 +386,13 @@ function applyPick(msg, from) {
   if (b) b.hp = Math.min(b.mhp, b.hp + CONFIG.foodHeal);
   else editGame((g) => ({ awards: [...g.awards.slice(-12), [it.i, from]] }));
 }
-/** AI buddies: go for a goon nobody else is on, punch-punch-hook, kick now and then, grab food when hurt. */
+/** AI buddies: go for a goon nobody else is on, punch-punch-hook, kick now and then, a flying kick from
+ *  a little way off, grab food when hurt. */
 function buddyInput(b, g, now) {
   const inp = { x: 0, z: 0, punch: false, kick: false, jump: false };
   if (b.dn || b.st === "down" || b.st === "hurt" || b.st === "up" || g.phase === "clear" || g.phase === "over") return inp;
   const mobs = mobList().filter((m) => m.st !== "dead" && m.st !== "down" && m.x > g.min && m.x < g.lock);
-  const food = b.hp < b.mhp * 0.5 ? lootList().sort((p, q) => Math.abs(p.x - b.x) - Math.abs(q.x - b.x))[0] : null;
+  const food = b.hp <= b.mhp - CONFIG.foodHeal / 2 ? lootList().filter((l) => l.x > g.min + 30 && l.x < g.lock - 30).sort((p, q) => Math.abs(p.x - b.x) - Math.abs(q.x - b.x))[0] : null;
   let goal = null;
   if (food) goal = { ...food, food: true };
   else if (mobs.length) {
@@ -409,6 +412,11 @@ function buddyInput(b, g, now) {
   if (Math.abs(dx) > 10) inp.x = Math.sign(dx);
   if (Math.abs(dz) > 6) inp.z = Math.sign(dz) * Math.min(1, Math.abs(dz) / 25);
   if (goal.food && Math.hypot(dx, dz * 2) < 30) { b.pick = goal; }
+  if (goal.mob && b.y <= 0 && b.st !== "atk" && Math.abs(goal.mob.x - b.x) > 60 && Math.abs(goal.mob.x - b.x) < 110 && Math.abs(goal.mob.z - b.z) < 14 && now > (b.nextJump || 0)) {
+    b.nextJump = now + 4000 + Math.random() * 5000; b.kickAt = now + 120 + Math.random() * 120; // now and then: jump at the goon, kick in the air
+    inp.x = Math.sign(goal.mob.x - b.x); inp.jump = true;
+  }
+  if (b.kickAt && b.y > 0 && now > b.kickAt) { b.kickAt = 0; inp.kick = true; }
   if (goal.mob && Math.abs(dx) < 22 && Math.abs(dz) < 12) { // in place: turn and swing
     inp.x = 0; b.f = Math.sign(goal.mob.x - b.x) || b.f;
     if (now > (b.nextSwing || 0)) {
@@ -474,7 +482,7 @@ function landHits(h, by) {
     if (h.hitSet.has(m.i) || !canBeHit(m) || !inReach(h, M.reach, { ...m, size: ENEMIES[m.t].size }, h.mv === "jkick" ? 110 : 60)) continue;
     h.hitSet.add(m.i);
     hitFx(m.x, m.z, (m.y || 0) + 70 * ENEMIES[m.t].size, M.kd ? "#ffd23f" : "#ffffff", M.kd ? "POW!" : "");
-    if (h === me) { sfx(M.kd ? "pow" : "hit"); if (M.kd) shake = 5; }
+    if (h === me) { sfx(M.kd ? "pow" : "hit"); if (M.kd) shake = 5; myHits.set(m.i, Date.now()); }
     const msg = { m: m.i, d: M.dmg, kd: M.kd ? 1 : 0, dir: h.f };
     if (host.acting) applyHit(msg, by); else net.send("hit", msg);
   }
@@ -539,14 +547,26 @@ function syncViews(dt) {
   for (const [id, p] of Object.entries(S.entities.players || {})) {
     if (id === me.id || !live.has(id)) continue;
     const s = parseOnce("p:" + id, p.p, null); if (!s || s.g !== gid) continue;
-    seen.add(id); ease(views, id, { ...s, dn: !!s.dn, name: p.n || "Player", color: p.c || "#ccc", mhp: CONFIG.hp }, dt);
+    seen.add(id); hurtFx(views, id, s.hp, () => ease(views, id, { ...s, dn: !!s.dn, name: p.n || "Player", color: p.c || "#ccc", mhp: CONFIG.hp }, dt));
   }
-  if (!host.acting) for (const b of shared("bots", [])) { seen.add(b.i); ease(views, b.i, { ...b, dn: !!b.dn, name: b.n, color: b.c, mhp: CONFIG.hp, bot: true }, dt); }
+  if (!host.acting) for (const b of shared("bots", [])) { seen.add(b.i); hurtFx(views, b.i, b.hp, () => ease(views, b.i, { ...b, dn: !!b.dn, name: b.n, color: b.c, mhp: CONFIG.hp, bot: true }, dt)); }
   for (const id of views.keys()) if (!seen.has(id)) views.delete(id);
   const mseen = new Set();
-  if (!host.acting) for (const m of mobList()) { mseen.add(m.i); ease(mviews, m.i, m, dt, 300); }
+  if (!host.acting) for (const m of mobList()) { mseen.add(m.i); hurtFx(mviews, m.i, m.hp, () => ease(mviews, m.i, m, dt, 300)); }
   for (const id of mviews.keys()) if (!mseen.has(id)) mviews.delete(id);
 }
+/** Someone else's health went down in state: show the hit here too (sparks, POW!, K.O.!). My own hits
+ *  already sparked when I swung; the host draws the hits its own simulation makes. */
+function hurtFx(map, id, hp, update) {
+  const was = map.get(id)?.hp, v = update();
+  if (was === undefined || !(hp < was)) return;
+  if (v.t) { // a goon
+    const E = ENEMIES[v.t];
+    if (Date.now() - (myHits.get(v.i) || 0) > 400) hitFx(v.x, v.z, (v.y || 0) + 70 * E.size, v.st === "down" ? "#ffd23f" : "#ffffff", v.st === "down" && hp > 0 ? "POW!" : "");
+    if (hp <= 0) koFx(v);
+  } else hitFx(v.x, v.z, (v.y || 0) + 70, "#ff4d6d");
+}
+const myHits = new Map(); // goon id -> when my own punch or kick last landed on it
 /** The goons as this screen shows them (the host: its own simulation). */
 const mobView = () => (host.acting ? host.mobs : [...mviews.values()]);
 // Effects, in world units
@@ -729,7 +749,7 @@ function hud(g) {
   if (showCard) {
     $("overTitle").textContent = g.phase === "clear" ? `Stage ${g.stage} clear!` : "Game over";
     $("overSub").textContent = g.phase === "clear" ? "The street is yours. The next one is tougher." : `The squad made it to stage ${g.stage}.`;
-    $("results").innerHTML = Object.entries(g.score || {}).sort((a, b) => b[1] - a[1]).map(([id, pts]) => `<li class="${id === me.id ? "me" : ""}">${esc(id === me.id ? myName : (g.names || {})[id] || "Someone")}<span>${pts}</span></li>`).join("") || "<li>No hits yet.</li>";
+    $("results").innerHTML = Object.entries(g.score || {}).sort((a, b) => b[1] - a[1]).map(([id, pts]) => `<li class="${id === me.id ? "me" : ""}">${esc(id === me.id ? myName : (g.names || {})[id] || "Someone")}<span>${pts}</span></li>`).join("") || "<li class='note'>No hits yet.</li>";
     $("again").textContent = g.phase === "clear" ? "Next stage" : "Play again";
     $("next").textContent = `${g.phase === "clear" ? "Next stage" : "New run"} in ${Math.max(0, Math.ceil((g.endsAt - Date.now()) / 1000))}s`;
     if (me.shownFor !== g.id + g.phase) { me.shownFor = g.id + g.phase; showBoard((g.score || {})[me.id] || 0); }
@@ -737,11 +757,11 @@ function hud(g) {
 }
 function showBoard(score) {
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = "<li class='note'>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class='note'>Loading…</li>";
   (score > 0 ? board.submit(score).catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li>No scores yet. Be the first.</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${e.score}</span></li>`).join("") : "<li class='note'>No scores yet. Be the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class='note'>Couldn't load the leaderboard.</li>"; });
 }
 $("again").onclick = () => { if (host.acting) host.again = true; else net.send("again", {}); };
 let actx = null;
@@ -815,7 +835,6 @@ function frame(now) {
   net.on("hurt", (msg) => {
     if (!msg) return;
     if (msg.to === me.id && hurtHero(me, clamp(Number(msg.d) || 0, 0, 30), !!msg.kd, Math.sign(Number(msg.dir)) || 1)) { shake = msg.kd ? 14 : 7; sfx("ouch"); hitFx(me.x, me.z, 70, "#ff4d6d"); publish(true); }
-    else { const v = views.get(msg.to); if (v) hitFx(v.x, v.z, 70, "#ff4d6d"); }
   });
   net.onDisconnect(() => { reconnecting = true; $("net").textContent = "Reconnecting…"; });
   net.onReconnect(() => { reconnecting = false; });
